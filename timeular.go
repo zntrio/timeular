@@ -17,6 +17,9 @@ type Timeular interface {
 	// OnOrientationChanged registers a callback for the actor which is triggered
 	// by an orientation change notification.
 	OnOrientationChanged(func(uint8))
+	// OnBatteryLevelChanged registers a callback for the actor which is triggered
+	// by battery level change notification.
+	OnBatteryLevelChanged(func(uint8))
 	// Run the event monitor.
 	Run(ctx context.Context) error
 }
@@ -46,18 +49,20 @@ func New(device *bluetooth.Device) (Timeular, error) {
 	}
 
 	return &timeularDevice{
-		device:                     device,
-		orientationChangedCallback: nil,
-		batteryService:             services[0],
-		orientionService:           services[1],
+		device:                      device,
+		orientationChangedCallback:  nil,
+		batteryLevelChangedCallback: nil,
+		batteryService:              services[0],
+		orientionService:            services[1],
 	}, nil
 }
 
 type timeularDevice struct {
-	device                     *bluetooth.Device
-	orientationChangedCallback func(uint8)
-	orientionService           bluetooth.DeviceService
-	batteryService             bluetooth.DeviceService
+	device                      *bluetooth.Device
+	orientationChangedCallback  func(uint8)
+	batteryLevelChangedCallback func(uint8)
+	orientionService            bluetooth.DeviceService
+	batteryService              bluetooth.DeviceService
 }
 
 func (td *timeularDevice) GetOrientation() (uint8, error) {
@@ -88,23 +93,48 @@ func (td *timeularDevice) GetBatteryLevel() (uint8, error) {
 	return uint8(out[0]), nil
 }
 
-func (td *timeularDevice) OnOrientationChanged(callback func(faceID uint8)) {
+func (td *timeularDevice) OnOrientationChanged(callback func(uint8)) {
 	td.orientationChangedCallback = callback
 }
 
+func (td *timeularDevice) OnBatteryLevelChanged(callback func(uint8)) {
+	td.batteryLevelChangedCallback = callback
+}
+
 func (td *timeularDevice) Run(ctx context.Context) error {
-	// Subscribe to events
-	orientation, err := td.getOrientationCharacteristic()
-	if err != nil {
-		return fmt.Errorf("unable to retrieve orientation characteristic: %w", err)
+	// Monitor orientation changes
+	if td.orientationChangedCallback != nil {
+		// Subscribe to event
+		orientation, err := td.getOrientationCharacteristic()
+		if err != nil {
+			return fmt.Errorf("unable to retrieve orientation characteristic: %w", err)
+		}
+
+		if err := orientation.EnableNotifications(func(buf []byte) {
+			if len(buf) == 1 {
+				td.orientationChangedCallback(uint8(buf[0]))
+			}
+		}); err != nil {
+			return fmt.Errorf("unable to register orientation notification handler: %w", err)
+		}
 	}
 
-	// Monitor orientation changes
-	orientation.EnableNotifications(func(buf []byte) {
-		if len(buf) == 1 && td.orientationChangedCallback != nil {
-			td.orientationChangedCallback(uint8(buf[0]))
+	// Monitor battery level changes
+	if td.batteryLevelChangedCallback != nil {
+		// Subscribe to event
+		battery, err := td.getBatteryLevelCharacteristic()
+		if err != nil {
+			return fmt.Errorf("unable to retrieve battery level characteristic: %w", err)
 		}
-	})
+
+		if err := battery.EnableNotifications(func(buf []byte) {
+			if len(buf) == 1 {
+				td.batteryLevelChangedCallback(uint8(buf[0]))
+			}
+		}); err != nil {
+			return fmt.Errorf("unable to register battery level notification handler: %w", err)
+		}
+	}
 
 	select {
 	case <-ctx.Done():

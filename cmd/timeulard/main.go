@@ -2,12 +2,14 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
 	"os"
 	"os/signal"
 
+	zmq "github.com/go-zeromq/zmq4"
 	"golang.org/x/sync/errgroup"
 	"tinygo.org/x/bluetooth"
 	"zntr.io/timeular"
@@ -95,14 +97,64 @@ func run() error {
 	}
 	slog.DebugContext(ctx, "Initial orientation", "faceID", faceID)
 
+	sendQueue := make(chan any, 100)
+
+	// Create ZMQ server
+	server := zmq.NewPub(ctx)
+	defer server.Close()
+
+	if err := server.Listen("tcp://*:5563"); err != nil {
+		return fmt.Errorf("unable to start publisher server: %w", err)
+	}
+
+	slog.InfoContext(ctx, "Publisher started and listening", "address", server.Addr().String())
+
 	// Register orientation change callback.
 	t.OnOrientationChanged(func(u uint8) {
 		// Send notification via pubsub/etc.
 		slog.DebugContext(ctx, "Orientation changed", "faceID", u)
+		sendQueue <- map[string]any{
+			"type": "orientationChanged",
+			"value": u,
+		}
 	})
 
+	// Register battery level change callback.
+	t.OnBatteryLevelChanged(func(u uint8) {
+		// Send notification via pubsub/etc.
+		slog.DebugContext(ctx, "Battery level changed", "level", u)
+		sendQueue <- map[string]any{
+			"type": "batteryLevelChanged",
+			"value": u,
+		}
+	})
+	
 	// Run the event monitor.
 	eg, egCtx := errgroup.WithContext(ctx)
+
+	eg.Go(func() error {
+		for {
+			select {
+			case m := <-sendQueue:
+				// Encode event as JSON
+				payload, err := json.Marshal(m)
+				if err != nil {
+					slog.Error("unable to encode event", "error", err)
+					continue
+				}
+
+				slog.DebugContext(egCtx, "Publishing event...", "payload", string(payload))
+				
+				if err := server.Send(zmq.NewMsgFrom(payload)); err != nil {
+					slog.Error("unable to publish event", "error", err)
+					continue
+				}
+			case <-egCtx.Done():
+				return egCtx.Err()
+			}
+		}
+	})
+
 	eg.Go(func() error {
 		return t.Run(egCtx)
 	})
@@ -112,6 +164,8 @@ func run() error {
 			return fmt.Errorf("error occured in event monitor: %w", err)
 		}
 	}
+
+	close(sendQueue)
 
 	// Disconnect the bluetooth device
 	if err := device.Disconnect(); err != nil {
