@@ -6,7 +6,7 @@ require tinygo.org/x/bluetooth v0.7.0
 
 require (
 	github.com/go-zeromq/goczmq/v4 v4.2.2 // indirect
-	golang.org/x/text v0.3.7 // indirect
+	golang.org/x/text v0.3.8 // indirect
 )
 
 require (
