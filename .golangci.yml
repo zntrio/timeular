@@ -1,0 +1,51 @@
+run:
+  timeout: 5m
+  tests: false
+  skip-files:
+    - "testing.go"
+    - ".*\\.pb\\.go"
+    - ".*\\.gen\\.go"
+
+linters-settings:
+  golint:
+    min-confidence: 0
+  goconst:
+    min-len: 5
+    min-occurrences: 4
+  misspell:
+    locale: US
+
+linters:
+  disable-all: true
+  enable:
+    - asciicheck
+    - bodyclose
+    - dogsled
+    - errcheck
+    - exhaustive
+    - exportloopref
+    - goconst
+    - gocritic
+    - gocyclo
+    - godot
+    - gofmt
+    - gofumpt
+    - goimports
+    - gomodguard
+    - gosec
+    - gosimple
+    - govet
+    - ineffassign
+    - misspell
+    - nakedret
+    - noctx
+    - prealloc
+    - exportloopref
+    - staticcheck
+    - unused
+    - stylecheck
+    - typecheck
+    - unconvert
+    - unparam
+    - unused
+    - whitespace
