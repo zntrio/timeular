@@ -2,17 +2,20 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
+	"net"
 	"os"
 	"os/signal"
+	"time"
 
-	zmq "github.com/go-zeromq/zmq4"
+	"github.com/gofrs/uuid"
 	"golang.org/x/sync/errgroup"
+	"google.golang.org/grpc"
 	"tinygo.org/x/bluetooth"
 	"zntr.io/timeular"
+	eventsv1 "zntr.io/timeular/api/timeular/events/v1"
 )
 
 var (
@@ -20,19 +23,19 @@ var (
 )
 
 const (
-	deviceName                = "Timeular Tra"
+	deviceName = "Timeular Tra"
 )
 
 func main() {
 	// Initialize default logger
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
-		Level: slog.LevelDebug,
+		Level:     slog.LevelDebug,
 		AddSource: false,
 	})).With(
 		"service", "timeulard",
 	)
 	slog.SetDefault(logger)
-	
+
 	if err := run(); err != nil {
 		logger.Error("unable to run the application", err)
 	}
@@ -69,7 +72,7 @@ func run() error {
 	}
 
 	var (
-		device *bluetooth.Device
+		device        *bluetooth.Device
 		connectionErr error
 	)
 
@@ -97,25 +100,34 @@ func run() error {
 	}
 	slog.DebugContext(ctx, "Initial orientation", "faceID", faceID)
 
-	sendQueue := make(chan any, 100)
+	// Prepare send queue
+	sendQueue := make(chan *eventsv1.Event, 100)
 
-	// Create ZMQ server
-	server := zmq.NewPub(ctx)
-	defer server.Close()
-
-	if err := server.Listen("tcp://*:5563"); err != nil {
-		return fmt.Errorf("unable to start publisher server: %w", err)
+	// Send initial orientation
+	sendQueue <- &eventsv1.Event{
+		EventId:   uuid.Must(uuid.NewV7()).Bytes(),
+		Timestamp: uint64(time.Now().Unix()),
+		EventType: eventsv1.EventType_EVENT_TYPE_ORIENTATION_CHANGED,
+		Payload: &eventsv1.Event_OrientationChanged{
+			OrientationChanged: &eventsv1.OrientationChangedPayload{
+				FaceId: uint32(faceID),
+			},
+		},
 	}
-
-	slog.InfoContext(ctx, "Publisher started and listening", "address", server.Addr().String())
 
 	// Register orientation change callback.
 	t.OnOrientationChanged(func(u uint8) {
 		// Send notification via pubsub/etc.
 		slog.DebugContext(ctx, "Orientation changed", "faceID", u)
-		sendQueue <- map[string]any{
-			"type": "orientationChanged",
-			"value": u,
+		sendQueue <- &eventsv1.Event{
+			EventId:   uuid.Must(uuid.NewV7()).Bytes(),
+			Timestamp: uint64(time.Now().Unix()),
+			EventType: eventsv1.EventType_EVENT_TYPE_ORIENTATION_CHANGED,
+			Payload: &eventsv1.Event_OrientationChanged{
+				OrientationChanged: &eventsv1.OrientationChangedPayload{
+					FaceId: uint32(u),
+				},
+			},
 		}
 	})
 
@@ -123,40 +135,48 @@ func run() error {
 	t.OnBatteryLevelChanged(func(u uint8) {
 		// Send notification via pubsub/etc.
 		slog.DebugContext(ctx, "Battery level changed", "level", u)
-		sendQueue <- map[string]any{
-			"type": "batteryLevelChanged",
-			"value": u,
+		sendQueue <- &eventsv1.Event{
+			EventId:   uuid.Must(uuid.NewV7()).Bytes(),
+			Timestamp: uint64(time.Now().Unix()),
+			EventType: eventsv1.EventType_EVENT_TYPE_BATTERY_LEVEL_CHANGED,
+			Payload: &eventsv1.Event_BatteryLevelChanged{
+				BatteryLevelChanged: &eventsv1.BatteryLevelChangedPayload{
+					Level: uint32(u),
+				},
+			},
 		}
 	})
-	
+
+	// Create the grpc stream server
+	server := grpc.NewServer()
+	eventsv1.RegisterEventHubServiceServer(server, &eventHub{
+		sendQueue: sendQueue,
+	})
+
 	// Run the event monitor.
 	eg, egCtx := errgroup.WithContext(ctx)
 
 	eg.Go(func() error {
-		for {
-			select {
-			case m := <-sendQueue:
-				// Encode event as JSON
-				payload, err := json.Marshal(m)
-				if err != nil {
-					slog.Error("unable to encode event", "error", err)
-					continue
-				}
+		slog.InfoContext(ctx, "Publisher started and listening")
 
-				slog.DebugContext(egCtx, "Publishing event...", "payload", string(payload))
-				
-				if err := server.Send(zmq.NewMsgFrom(payload)); err != nil {
-					slog.Error("unable to publish event", "error", err)
-					continue
-				}
-			case <-egCtx.Done():
-				return egCtx.Err()
-			}
+		// Prepare listener
+		lis, err := net.Listen("tcp", ":27045")
+		if err != nil {
+			return fmt.Errorf("unable to initialize timeular hub: %w", err)
 		}
+
+		return server.Serve(lis)
 	})
 
 	eg.Go(func() error {
 		return t.Run(egCtx)
+	})
+
+	eg.Go(func() error {
+		<-egCtx.Done()
+		// Close the gRPC service
+		server.GracefulStop()
+		return nil
 	})
 
 	if err := eg.Wait(); err != nil {
@@ -165,6 +185,7 @@ func run() error {
 		}
 	}
 
+	// Close the broadcast channel
 	close(sendQueue)
 
 	// Disconnect the bluetooth device
@@ -173,4 +194,28 @@ func run() error {
 	}
 
 	return nil
+}
+
+type eventHub struct {
+	eventsv1.EventHubServiceServer
+
+	sendQueue chan *eventsv1.Event
+}
+
+func (hub *eventHub) Subscribe(listener eventsv1.EventHubService_SubscribeServer) error {
+	ctx := listener.Context()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case m := <-hub.sendQueue:
+			// Send to the listener
+			if err := listener.Send(&eventsv1.SubscribeResponse{
+				Event: m,
+			}); err != nil {
+				return fmt.Errorf("unable to broadcast event to the listener: %w", err)
+			}
+		}
+	}
 }

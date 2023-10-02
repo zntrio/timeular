@@ -1,0 +1,50 @@
+syntax = "proto3";
+
+package timeular.events.v1;
+
+// EventType enumerates known device events.
+enum EventType {
+    EVENT_TYPE_UNSPECIFIED = 0;
+    EVENT_TYPE_DEVICE_CONNECTED = 1;
+    EVENT_TYPE_DEVICE_DISCONNECTED = 2;
+    EVENT_TYPE_BATTERY_LEVEL_CHANGED = 3;
+    EVENT_TYPE_ORIENTATION_CHANGED = 4;
+}
+
+// Event represents device events broadcasted by the device.
+message Event {
+    // Unique event identifier.
+    bytes event_id = 1;
+    // Event type to determine the payload type.
+    EventType event_type = 2;
+    // Event timestamp.
+    uint64 timestamp = 3;
+    // Event payload matching the event type.
+    oneof payload {
+        DeviceConnectedPayload device_connected = 10;
+        DeviceDisconnectedPayload device_disconnected = 11;
+        BatteryLevelChangedPayload battery_level_changed = 12;
+        OrientationChangedPayload orientation_changed = 13;
+    }
+}
+
+// DeviceConnectedPayload holds the properties of a device connection event.
+message DeviceConnectedPayload {}
+
+// DeviceDisconnectedPayload holds the properties of a device disconnection 
+// event.
+message DeviceDisconnectedPayload {}
+
+// BatteryLevelChangedPayload holds the properties of a device battery level 
+// modification event.
+message BatteryLevelChangedPayload {
+    uint32 level = 1;
+}
+
+// OrientationChangedPayload holds the properties of a device orientation 
+// modification.
+message OrientationChangedPayload {
+    uint32 face_id = 1;
+}
+
+

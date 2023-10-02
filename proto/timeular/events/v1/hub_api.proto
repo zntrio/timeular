@@ -1,0 +1,16 @@
+syntax = "proto3";
+
+package timeular.events.v1;
+
+import "timeular/events/v1/events.proto";
+
+service EventHubService {
+    // List for device events.
+    rpc Subscribe(stream SubscribeRequest) returns (stream SubscribeResponse);
+}
+
+message SubscribeRequest {}
+
+message SubscribeResponse {
+    Event event = 1;
+}
