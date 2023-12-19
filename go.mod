@@ -3,7 +3,7 @@ module zntr.io/timeular
 go 1.21
 
 require (
-	google.golang.org/grpc v1.60.0
+	google.golang.org/grpc v1.60.1
 	google.golang.org/protobuf v1.31.0
 	tinygo.org/x/bluetooth v0.8.0
 )
