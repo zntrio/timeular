@@ -3,16 +3,16 @@ module zntr.io/timeular
 go 1.21
 
 require (
-	google.golang.org/grpc v1.60.0
-	google.golang.org/protobuf v1.31.0
+	google.golang.org/grpc v1.62.0
+	google.golang.org/protobuf v1.32.0
 	tinygo.org/x/bluetooth v0.8.0
 )
 
 require (
 	github.com/golang/protobuf v1.5.3 // indirect
-	golang.org/x/net v0.17.0 // indirect
-	golang.org/x/text v0.13.0 // indirect
-	google.golang.org/genproto/googleapis/rpc v0.0.0-20231002182017-d307bd883b97 // indirect
+	golang.org/x/net v0.20.0 // indirect
+	golang.org/x/text v0.14.0 // indirect
+	google.golang.org/genproto/googleapis/rpc v0.0.0-20240123012728-ef4313101c80 // indirect
 )
 
 require (
@@ -24,6 +24,6 @@ require (
 	github.com/saltosystems/winrt-go v0.0.0-20230921082907-2ab5b7d431e1 // indirect
 	github.com/sirupsen/logrus v1.9.3 // indirect
 	github.com/tinygo-org/cbgo v0.0.4 // indirect
-	golang.org/x/sync v0.5.0
-	golang.org/x/sys v0.13.0 // indirect
+	golang.org/x/sync v0.6.0
+	golang.org/x/sys v0.16.0 // indirect
 )
